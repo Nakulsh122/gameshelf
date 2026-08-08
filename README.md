@@ -1,36 +1,76 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🎮 GameShelf
 
-## Getting Started
+GameShelf is a modern, sleek web application built to help you track, manage, and organize your video game collection. Whether you're managing a growing backlog, tracking what you're currently playing, or keeping a record of completed games, GameShelf provides an intuitive interface to handle it all.
 
-First, run the development server:
+## 🌟 Features
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+- **Custom Playlists:** Organize your games into default playlists (Playing, Completed, Backlog, Dropped) or create your own custom categories.
+- **Authentication:** Secure user authentication and data syncing powered by Supabase.
+- **Gamer Profile:** Personalize your profile with an avatar and link your Xbox, PSN, and Steam gamer tags.
+- **Errands (Quest Tracking):** Keep track of in-game tasks, side quests, or achievements for specific games directly in the app.
+- **Dark Mode Support:** A beautifully designed interface that adapts to your preferred theme.
+- **Responsive Design:** Seamlessly works across desktop and mobile devices.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 🛠️ Tech Stack
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+- **Framework:** [Next.js](https://nextjs.org/) (React)
+- **Database & Auth:** [Supabase](https://supabase.com/)
+- **Caching/State:** [Upstash Redis](https://upstash.com/)
+- **Styling:** Vanilla CSS / Modern UI conventions
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 🚀 Getting Started
 
-## Learn More
+### Prerequisites
 
-To learn more about Next.js, take a look at the following resources:
+- Node.js (v18 or higher recommended)
+- A Supabase project
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Installation
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/Nakulsh122/gameshelf.git
+   cd gameshelf
+   ```
 
-## Deploy on Vercel
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+3. Set up environment variables:
+   Create a `.env.local` file in the root directory and add your Supabase credentials:
+   ```env
+   NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+   ```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+4. Run the development server:
+   ```bash
+   npm run dev
+   ```
+
+5. Open [http://localhost:3000](http://localhost:3000) with your browser to see the app.
+
+## 🚀 Deployment
+
+This project is configured for continuous deployment with Vercel. 
+Simply push your changes to the `main` branch, and Vercel will automatically build and deploy the updates.
+
+## 🔮 Future Enhancements (Roadmap)
+
+We are constantly looking to improve GameShelf! Here are some features we plan to add in the future:
+
+- **Third-Party API Integration (IGDB/RAWG):** Automatically fetch official game cover art, descriptions, release dates, and genres when searching for a game.
+- **Social & Sharing:** 
+  - Ability to make your GameShelf public and share a unique link with friends.
+  - Follow other users and see their recent activity.
+- **Advanced Stats & Tracking:** 
+  - Track hours played for each game.
+  - Give games a star rating out of 5 and write personal reviews.
+- **Achievements Syncing:** Automatically pull in your actual achievements and trophies from Steam, Xbox, and PlayStation.
+- **Sorting & Filtering:** Filter your library by platform, genre, or release year.
+
+## 📝 License
+
+This project is licensed under the MIT License.
