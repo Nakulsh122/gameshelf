@@ -52,6 +52,33 @@ GameShelf is a modern, sleek web application built to help you track, manage, an
 
 5. Open [http://localhost:3000](http://localhost:3000) with your browser to see the app.
 
+## 📖 How to Use GameShelf (User Guide)
+
+Once the app is running (or you visit the live site), here is how you can get started:
+
+1. **Sign Up / Log In:** 
+   - When you first open the app, you will be prompted to create an account or log in using your email. 
+   - Your data is securely saved so you can access your GameShelf from any device.
+
+2. **Add Games to Your Library:**
+   - Use the search bar at the top to find games you want to track.
+   - Click the **"+"** icon next to a game.
+   - Choose which playlist to add it to (e.g., *Playing*, *Completed*, *Backlog*, or *Dropped*).
+
+3. **Manage Playlists:**
+   - Navigate to the sidebar to view your games grouped by playlist.
+   - You can create your own custom playlists (like "Couch Co-op" or "2024 Must Plays") by clicking "New Playlist" in the sidebar.
+   - Move games between playlists as your progress changes.
+
+4. **Track Errands & Quests:**
+   - Open the **Errands** tab from the sidebar.
+   - Select a game you are currently playing.
+   - Add specific tasks, side quests, or achievements you want to remember to complete.
+
+5. **Personalize Your Profile:**
+   - Click on your avatar in the top right to open your Profile.
+   - Update your Gamer Tags (Xbox Live, PSN, Steam) so all your gaming identities are in one place.
+
 ## 🚀 Deployment
 
 This project is configured for continuous deployment with Vercel. 
