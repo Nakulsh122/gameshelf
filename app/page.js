@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 
 const DEFAULT_PLAYLISTS = [
@@ -8,6 +8,19 @@ const DEFAULT_PLAYLISTS = [
   { id: "completed", label: "Completed", color: "#10b981" },
   { id: "backlog", label: "Backlog", color: "#f59e0b" },
   { id: "dropped", label: "Dropped", color: "#ef4444" },
+];
+
+const FILTER_GENRES = [
+  { id: 12, label: "RPG" },
+  { id: 5, label: "Shooter" },
+  { id: 31, label: "Action" },
+  { id: 15, label: "Strategy" },
+  { id: 13, label: "Simulation" },
+  { id: 14, label: "Sports" },
+  { id: 10, label: "Racing" },
+  { id: 9, label: "Puzzle" },
+  { id: 33, label: "Arcade" },
+  { id: 8, label: "Platform" }
 ];
 
 export default function GameShelf() {
@@ -18,11 +31,15 @@ export default function GameShelf() {
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState("");
   const [isLogin, setIsLogin] = useState(true);
+  const [activeTaskGame, setActiveTaskGame] = useState(null);
+  const [isLoadingRecs, setIsLoadingRecs] = useState(false);
+  const [selectedGameDetails, setSelectedGameDetails] = useState(null);
+  const [isLoadingDetails, setIsLoadingDetails] = useState(false);
 
   // App state
   const [games, setGames] = useState([]);
   const [currentView, setCurrentView] = useState("home"); // "home" | "profile" | "playlist-[id]" | "errands"
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [currentTheme, setCurrentTheme] = useState("theme-glass");
   const [playlists, setPlaylists] = useState(DEFAULT_PLAYLISTS);
   
   // Profile state
@@ -31,12 +48,22 @@ export default function GameShelf() {
   const [shareId, setShareId] = useState("");
   const [profileSaving, setProfileSaving] = useState(false);
   
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  
+  // Recommendation state
+  const [recommendedGame, setRecommendedGame] = useState(null);
+  const [isRecommending, setIsRecommending] = useState(false);
+  
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [gameToAdd, setGameToAdd] = useState(null); // Used for the category selection modal
+  const [searchGenres, setSearchGenres] = useState([]);
+  const [searchYearStart, setSearchYearStart] = useState("");
+  const [searchYearEnd, setSearchYearEnd] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
   
   // Playlist Creation State
   const [showNewPlaylistInput, setShowNewPlaylistInput] = useState(false);
@@ -45,7 +72,6 @@ export default function GameShelf() {
   const [editPlaylistName, setEditPlaylistName] = useState("");
 
   // Errands State (DB keeps 'tasks' as column name)
-  const [activeTaskGame, setActiveTaskGame] = useState(null);
   const [newTaskInput, setNewTaskInput] = useState("");
   
   // Custom Dropdown State
@@ -62,8 +88,11 @@ export default function GameShelf() {
     if (typeof window !== 'undefined') {
       const isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
       if (isDark) {
-        setIsDarkMode(true);
-        document.body.classList.add("dark-mode");
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setCurrentTheme("theme-glass-dark");
+        document.body.className = "theme-glass-dark";
+      } else {
+        document.body.className = "theme-glass";
       }
     }
 
@@ -82,15 +111,7 @@ export default function GameShelf() {
   }, []);
 
   // --- Load User Data ---
-  useEffect(() => {
-    if (session) {
-      loadUserData();
-    } else {
-      setGames([]);
-    }
-  }, [session]);
-
-  const loadUserData = async () => {
+  const loadUserData = useCallback(async () => {
     if (!session?.user) return;
     
     // Load Games
@@ -109,14 +130,11 @@ export default function GameShelf() {
       .eq('id', session.user.id)
       .single();
 
+
     if (profileData) {
       if (profileData.theme) {
-        setIsDarkMode(profileData.theme === 'dark');
-        if (profileData.theme === 'dark') {
-          document.body.classList.add("dark-mode");
-        } else {
-          document.body.classList.remove("dark-mode");
-        }
+        setCurrentTheme(profileData.theme);
+        document.body.className = profileData.theme;
       }
       if (profileData.profile_pic) {
         setProfilePic(profileData.profile_pic);
@@ -131,7 +149,16 @@ export default function GameShelf() {
         setPlaylists(profileData.playlists);
       }
     }
-  };
+  }, [session?.user]);
+
+  useEffect(() => {
+    if (session) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      loadUserData();
+    } else {
+      setGames([]);
+    }
+  }, [session, loadUserData]);
 
   // --- Auth Handlers ---
   const handleAuth = async (e) => {
@@ -139,13 +166,26 @@ export default function GameShelf() {
     setAuthLoading(true);
     setAuthError("");
     
-    const { error } = isLogin 
-      ? await supabase.auth.signInWithPassword({ email, password })
-      : await supabase.auth.signUp({ email, password });
-
-    if (error) {
-      setAuthError(error.message);
+    if (isLogin) {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) setAuthError(error.message);
+    } else {
+      const { error } = await supabase.auth.signUp({ email, password });
+      
+      if (error) {
+        // If the user tries to sign up but the account already exists,
+        // automatically try to log them in instead!
+        if (error.message === "User already registered") {
+          const { error: loginError } = await supabase.auth.signInWithPassword({ email, password });
+          if (loginError) {
+            setAuthError("Account exists, but password was incorrect: " + loginError.message);
+          }
+        } else {
+          setAuthError(error.message);
+        }
+      }
     }
+
     setAuthLoading(false);
   };
 
@@ -153,20 +193,25 @@ export default function GameShelf() {
     await supabase.auth.signOut();
   };
 
-  const toggleTheme = async () => {
-    const newTheme = !isDarkMode;
-    setIsDarkMode(newTheme);
-    const themeStr = newTheme ? 'dark' : 'light';
-    
-    if (newTheme) {
-      document.body.classList.add("dark-mode");
-    } else {
-      document.body.classList.remove("dark-mode");
-    }
+  const THEMES = [
+    { id: "theme-glass", label: "Light" },
+    { id: "theme-glass-dark", label: "Dark" },
+    { id: "theme-retro", label: "Retro" }
+  ];
+
+  const handleThemeChange = async (themeStr) => {
+    setCurrentTheme(themeStr);
+    document.body.className = themeStr;
 
     if (session?.user) {
-      await supabase.from('profiles').update({ theme: themeStr }).eq('id', session.user.id);
+      await supabase.from('profiles').upsert({ id: session.user.id, theme: themeStr });
     }
+  };
+
+  const cycleTheme = () => {
+    const currentIndex = THEMES.findIndex(t => t.id === currentTheme);
+    const nextIndex = (currentIndex + 1) % THEMES.length;
+    handleThemeChange(THEMES[nextIndex].id);
   };
 
   // Handle clicking outside search results and custom dropdowns
@@ -176,7 +221,7 @@ export default function GameShelf() {
         setShowSearchResults(false);
       }
       // Also close dropdown if clicking outside (simplified check for any click not on a dropdown button)
-      if (!e.target.closest('.custom-dropdown-container')) {
+      if (!e.target.closest('.custom-dropdown-container') && !e.target.closest('.mobile-playlist-trigger')) {
           setOpenDropdownId(null);
       }
     };
@@ -185,15 +230,13 @@ export default function GameShelf() {
   }, []);
 
   // --- Search Logic ---
-  const handleSearchInput = (e) => {
-    const query = e.target.value;
-    setSearchQuery(query);
-
+  const triggerSearch = (query, genres, startYear, endYear) => {
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current);
     }
 
-    if (query.trim().length < 2) {
+    const hasFilters = genres.length > 0 || startYear || endYear;
+    if (query.trim().length < 2 && !hasFilters) {
       setShowSearchResults(false);
       setSearchResults([]);
       return;
@@ -204,7 +247,12 @@ export default function GameShelf() {
 
     searchTimeoutRef.current = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/games?search=${encodeURIComponent(query)}`);
+        let url = `/api/games?search=${encodeURIComponent(query)}`;
+        if (genres.length > 0) url += `&genres=${genres.join(',')}`;
+        if (startYear) url += `&startYear=${startYear}`;
+        if (endYear) url += `&endYear=${endYear}`;
+
+        const res = await fetch(url);
         const data = await res.json();
         
         if (!res.ok) {
@@ -220,6 +268,30 @@ export default function GameShelf() {
         setIsSearching(false);
       }
     }, 500); // Debounce
+  };
+
+  const handleSearchInput = (e) => {
+    const query = e.target.value;
+    setSearchQuery(query);
+    triggerSearch(query, searchGenres, searchYearStart, searchYearEnd);
+  };
+
+  const toggleGenre = (genreId) => {
+    setSearchGenres(prev => {
+        const newGenres = prev.includes(genreId) ? prev.filter(id => id !== genreId) : [...prev, genreId];
+        triggerSearch(searchQuery, newGenres, searchYearStart, searchYearEnd);
+        return newGenres;
+    });
+  };
+
+  const handleYearChange = (type, value) => {
+      if (type === 'start') {
+          setSearchYearStart(value);
+          triggerSearch(searchQuery, searchGenres, value, searchYearEnd);
+      } else {
+          setSearchYearEnd(value);
+          triggerSearch(searchQuery, searchGenres, searchYearStart, value);
+      }
   };
 
   const initAddGame = (apiGame) => {
@@ -284,6 +356,61 @@ export default function GameShelf() {
     }
   };
 
+
+
+  const handleRecommendGame = async () => {
+    if (games.length === 0) {
+      alert("Add some games first to get recommendations!");
+      return;
+    }
+    
+    setIsLoadingRecs(true);
+    setRecommendedGame(null);
+    try {
+        const res = await fetch('/api/recommendations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ games })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            setRecommendedGame(data);
+        } else {
+            console.error("Recs error:", data.error);
+            alert("Failed to fetch recommendations.");
+        }
+    } catch (err) {
+        console.error(err);
+        alert("Network error.");
+    } finally {
+        setIsLoadingRecs(false);
+    }
+  };
+
+  const handleGameClick = async (gameId) => {
+    setSelectedGameDetails({ loading: true });
+    setIsLoadingDetails(true);
+    
+    try {
+        const res = await fetch(`/api/game-details?id=${gameId}`);
+        const data = await res.json();
+        
+        if (res.ok) {
+            setSelectedGameDetails(data);
+        } else {
+            console.error(data.error);
+            setSelectedGameDetails(null);
+            alert("Failed to load game details.");
+        }
+    } catch (err) {
+        console.error(err);
+        setSelectedGameDetails(null);
+        alert("Network error.");
+    } finally {
+        setIsLoadingDetails(false);
+    }
+  };
+
   // --- Playlist Management ---
   const handleCreatePlaylist = async () => {
     if (!newPlaylistName.trim()) {
@@ -303,7 +430,7 @@ export default function GameShelf() {
     setShowNewPlaylistInput(false);
 
     // Save to DB
-    const { error } = await supabase.from('profiles').update({ playlists: updatedPlaylists }).eq('id', session.user.id);
+    const { error } = await supabase.from('profiles').upsert({ id: session.user.id, playlists: updatedPlaylists });
     
     if (error) {
         console.error("Failed to save playlist:", error);
@@ -321,7 +448,7 @@ export default function GameShelf() {
     const updatedPlaylists = playlists.map(p => p.id === id ? { ...p, label: editPlaylistName.trim() } : p);
     
     // Save to DB
-    const { error } = await supabase.from('profiles').update({ playlists: updatedPlaylists }).eq('id', session.user.id);
+    const { error } = await supabase.from('profiles').upsert({ id: session.user.id, playlists: updatedPlaylists });
     
     if (error) {
         console.error("Failed to update playlist:", error);
@@ -337,7 +464,7 @@ export default function GameShelf() {
         const updatedPlaylists = playlists.filter(p => p.id !== id);
         
         // Save to DB
-        const { error } = await supabase.from('profiles').update({ playlists: updatedPlaylists }).eq('id', session.user.id);
+        const { error } = await supabase.from('profiles').upsert({ id: session.user.id, playlists: updatedPlaylists });
         if (error) {
             console.error("Failed to delete playlist:", error);
             alert(`Database Error: Could not delete playlist.`);
@@ -560,7 +687,7 @@ export default function GameShelf() {
             />
             <button 
               className="edit-pic-icon" 
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => setShowProfileModal(true)}
               style={{ zIndex: 2 }}
             >
               ✏️
@@ -640,6 +767,16 @@ export default function GameShelf() {
                 )}
             </div>
             
+
+
+            <button 
+              className={`category-btn`} 
+              onClick={handleRecommendGame}
+              disabled={isRecommending}
+            >
+              {isRecommending ? '🔮 Searching...' : '🔮 Discover New Game'}
+            </button>
+            
             <button 
               className={`category-btn ${currentView === "errands" ? "active" : ""}`} 
               onClick={() => {
@@ -649,16 +786,12 @@ export default function GameShelf() {
             >
               📝 Errands
             </button>
-
-            <button 
-              className={`category-btn ${currentView === "profile" ? "active" : ""}`} 
-              onClick={() => setCurrentView("profile")}
-            >
-              👤 Profile
-            </button>
         </nav>
 
-        <div className="settings-section" style={{ marginTop: 'auto' }}>
+        <div className="settings-section" style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <div style={{ fontSize: '0.8rem', textAlign: 'center', opacity: 0.7 }}>
+            Theme: {THEMES.find(t => t.id === currentTheme)?.label || "Unknown"}
+          </div>
           <button 
             className="btn outline"
             onClick={handleSignOut}
@@ -672,17 +805,86 @@ export default function GameShelf() {
       <main className="main-content">
         
         <header className="top-bar">
-          <div className="search-container" ref={searchContainerRef}>
-            <input 
-              type="text" 
-              id="game-search" 
-              placeholder="Search for games to add..." 
-              value={searchQuery}
-              onChange={handleSearchInput}
-              onFocus={() => {
-                if (searchQuery.trim().length >= 2) setShowSearchResults(true);
-              }}
-            />
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', width: '100%', maxWidth: '500px', position: 'relative' }} ref={searchContainerRef}>
+              <div className="search-container" style={{ flex: 1, maxWidth: 'none' }}>
+                <span className="search-icon">🔍</span>
+                <input 
+                  type="text" 
+                  id="game-search" 
+                  placeholder="Search for games to add..." 
+                  value={searchQuery}
+                  onChange={handleSearchInput}
+                  onFocus={() => {
+                    if (searchQuery.trim().length >= 2 || searchGenres.length > 0 || searchYearStart || searchYearEnd) setShowSearchResults(true);
+                  }}
+                  style={{ paddingLeft: '2.5rem' }}
+                />
+              </div>
+              <button 
+                  className="btn outline" 
+                  onClick={() => setShowFilters(!showFilters)}
+                  title="Advanced Filters"
+                  style={{ padding: '0.5rem', height: '42px', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.3s ease', transform: showFilters ? 'rotate(90deg)' : 'none' }}
+              >
+                  ⚙️
+              </button>
+
+            {showFilters && (
+                <div className="glass" style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: '0.75rem', zIndex: 100, padding: '1.5rem', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '1.5rem', boxShadow: '0 10px 40px -10px rgba(0,0,0,0.5)', border: '1px solid var(--glass-border)' }}>
+                    <div>
+                        <label style={{ display: 'block', marginBottom: '0.75rem', fontSize: '0.85rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '1.5px', fontWeight: 'bold' }}>Genres</label>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                            {FILTER_GENRES.map(g => (
+                                <button
+                                    key={g.id}
+                                    onClick={() => toggleGenre(g.id)}
+                                    style={{
+                                        padding: '0.4rem 1rem',
+                                        borderRadius: '20px',
+                                        fontSize: '0.85rem',
+                                        fontWeight: searchGenres.includes(g.id) ? 'bold' : 'normal',
+                                        border: searchGenres.includes(g.id) ? '1px solid var(--accent-color)' : '1px solid var(--glass-border)',
+                                        backgroundColor: searchGenres.includes(g.id) ? 'var(--accent-color)' : 'rgba(255, 255, 255, 0.05)',
+                                        color: searchGenres.includes(g.id) ? '#fff' : 'var(--text-primary)',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                                        boxShadow: searchGenres.includes(g.id) ? '0 4px 12px rgba(var(--accent-color-rgb), 0.3)' : 'none'
+                                    }}
+                                    onMouseEnter={(e) => { if(!searchGenres.includes(g.id)) e.target.style.backgroundColor = 'rgba(255,255,255,0.1)' }}
+                                    onMouseLeave={(e) => { if(!searchGenres.includes(g.id)) e.target.style.backgroundColor = 'rgba(255,255,255,0.05)' }}
+                                >
+                                    {g.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    <div>
+                        <label style={{ display: 'block', marginBottom: '0.75rem', fontSize: '0.85rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '1.5px', fontWeight: 'bold' }}>Release Year Range</label>
+                        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                            <input 
+                                type="number" 
+                                placeholder="YYYY" 
+                                value={searchYearStart} 
+                                onChange={(e) => handleYearChange('start', e.target.value)} 
+                                style={{ width: '90px', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.2)', color: 'var(--text-primary)', fontSize: '0.95rem', textAlign: 'center', outline: 'none' }}
+                                onFocus={(e) => e.target.style.borderColor = 'var(--accent-color)'}
+                                onBlur={(e) => e.target.style.borderColor = 'var(--glass-border)'}
+                            />
+                            <span style={{color: 'var(--text-secondary)', fontWeight: 'bold'}}>—</span>
+                            <input 
+                                type="number" 
+                                placeholder="YYYY" 
+                                value={searchYearEnd} 
+                                onChange={(e) => handleYearChange('end', e.target.value)}
+                                style={{ width: '90px', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.2)', color: 'var(--text-primary)', fontSize: '0.95rem', textAlign: 'center', outline: 'none' }}
+                                onFocus={(e) => e.target.style.borderColor = 'var(--accent-color)'}
+                                onBlur={(e) => e.target.style.borderColor = 'var(--glass-border)'}
+                            />
+                        </div>
+                    </div>
+                </div>
+            )}
             
             {showSearchResults && (
               <div className="search-results glass">
@@ -722,8 +924,12 @@ export default function GameShelf() {
             )}
           </div>
           
-          <button className="theme-toggle-btn" onClick={toggleTheme} title="Toggle Theme">
-            {isDarkMode ? "☀️" : "🌙"}
+          <button 
+            className="theme-toggle-btn" 
+            onClick={cycleTheme} 
+            title="Cycles through possible themes"
+          >
+            🎨
           </button>
         </header>
 
@@ -770,6 +976,8 @@ export default function GameShelf() {
                                         className="game-img" 
                                         src={imgUrl} 
                                         alt={game.name} 
+                                        onClick={() => handleGameClick(game.game_id)}
+                                        style={{ cursor: 'pointer' }}
                                     />
                                     
                                     {/* Custom React Dropdown */}
@@ -804,11 +1012,14 @@ export default function GameShelf() {
                                             </div>
                                         )}
                                     </div>
+                                    {/* Game Info Overlay */}
+                                    <div className="game-info-overlay">
+                                        <div className="game-title" title={game.name}>{game.name}</div>
+                                        <a href={ignSearchUrl} target="_blank" rel="noopener noreferrer" className="ign-link-text">
+                                            IGN
+                                        </a>
+                                    </div>
                                 </div>
-                                <div className="game-title">{game.name}</div>
-                                <a href={ignSearchUrl} target="_blank" rel="noopener noreferrer" className="ign-link-text">
-                                    IGN Guide
-                                </a>
                             </div>
                         );
                         })}
@@ -874,68 +1085,7 @@ export default function GameShelf() {
             </div>
         )}
 
-        {currentView === "profile" && (
-            <div className="profile-page-container">
-                <h1 className="page-title">Profile Settings</h1>
-                <div className="glass profile-form-card">
-                    <form onSubmit={handleSaveProfile}>
-                        <div className="form-group">
-                            <label>Share ID (Custom URL)</label>
-                            <div className="share-id-input-wrapper">
-                                <span className="share-url-prefix">gameshelf.app/u/</span>
-                                <input 
-                                    type="text" 
-                                    value={shareId} 
-                                    onChange={(e) => setShareId(e.target.value)}
-                                    placeholder="your-custom-id"
-                                    className="form-control"
-                                />
-                            </div>
-                            <small>Create a unique ID to share your shelf with friends.</small>
-                        </div>
-                        
-                        <h3 className="section-subtitle">Gamer Tags</h3>
-                        
-                        <div className="form-group">
-                            <label>Xbox Gamertag</label>
-                            <input 
-                                type="text" 
-                                value={gamerTags.xbox || ""} 
-                                onChange={(e) => setGamerTags({...gamerTags, xbox: e.target.value})}
-                                placeholder="Enter Xbox Gamertag"
-                                className="form-control"
-                            />
-                        </div>
-                        
-                        <div className="form-group">
-                            <label>PlayStation Network ID</label>
-                            <input 
-                                type="text" 
-                                value={gamerTags.psn || ""} 
-                                onChange={(e) => setGamerTags({...gamerTags, psn: e.target.value})}
-                                placeholder="Enter PSN ID"
-                                className="form-control"
-                            />
-                        </div>
 
-                        <div className="form-group">
-                            <label>Steam ID / Username</label>
-                            <input 
-                                type="text" 
-                                value={gamerTags.steam || ""} 
-                                onChange={(e) => setGamerTags({...gamerTags, steam: e.target.value})}
-                                placeholder="Enter Steam Username"
-                                className="form-control"
-                            />
-                        </div>
-
-                        <button type="submit" className="btn primary submit-profile-btn" disabled={profileSaving}>
-                            {profileSaving ? "Saving..." : "Save Profile"}
-                        </button>
-                    </form>
-                </div>
-            </div>
-        )}
 
       </main>
 
@@ -1073,6 +1223,272 @@ export default function GameShelf() {
         </div>
       )}
 
+
+
+      {/* Recommendation Modal */}
+      {recommendedGame && (
+        <div className="modal">
+          <div className="modal-content" style={{maxWidth: '450px', textAlign: 'center'}}>
+            <h2>You might like...</h2>
+            <img 
+              src={recommendedGame.cover?.url ? (recommendedGame.cover.url.startsWith('//') ? `https:${recommendedGame.cover.url}` : recommendedGame.cover.url).replace('t_thumb', 't_cover_big') : "https://via.placeholder.com/300x400?text=No+Image"} 
+              alt={recommendedGame.name} 
+              style={{width: '100%', borderRadius: '8px', margin: '1rem 0', maxHeight: '350px', objectFit: 'contain'}} 
+            />
+            <h3 style={{marginBottom: '1rem'}}>{recommendedGame.name}</h3>
+            <div style={{display: 'flex', gap: '1rem', flexDirection: 'column'}}>
+              <div style={{display: 'flex', gap: '1rem'}}>
+                <button className="btn primary" style={{flex: 1}} onClick={() => {
+                  setRecommendedGame(null);
+                  initAddGame(recommendedGame);
+                }}>Add to Shelf</button>
+                <button className="btn outline" style={{flex: 1}} onClick={() => {
+                  setRecommendedGame(null);
+                  handleGameClick(recommendedGame.id);
+                }}>View Details</button>
+              </div>
+              <button className="btn outline" style={{width: '100%', borderColor: 'transparent'}} onClick={() => setRecommendedGame(null)}>Dismiss</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Profile Settings Modal */}
+      {showProfileModal && (
+        <div className="modal">
+          <div className="modal-content" style={{maxWidth: '500px'}}>
+            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem'}}>
+                <h2 style={{margin: 0}}>Profile Settings</h2>
+                <button className="btn outline" style={{padding: '0.25rem 0.6rem', minWidth: 'auto', fontSize: '1.2rem', borderRadius: '50%'}} onClick={() => setShowProfileModal(false)}>×</button>
+            </div>
+            
+            <div style={{display: 'flex', justifyContent: 'center', marginBottom: '1.5rem'}}>
+                <div style={{position: 'relative'}}>
+                    <img 
+                        src={profilePic} 
+                        alt="Profile" 
+                        style={{width: '100px', height: '100px', borderRadius: '50%', objectFit: 'cover', border: '3px solid var(--accent-color)'}}
+                    />
+                    <button 
+                        className="btn primary"
+                        style={{position: 'absolute', bottom: '-10px', left: '50%', transform: 'translateX(-50%)', padding: '0.2rem 0.5rem', fontSize: '0.8rem', borderRadius: '12px'}}
+                        onClick={() => fileInputRef.current?.click()}
+                    >
+                        Change
+                    </button>
+                </div>
+            </div>
+
+            <form onSubmit={(e) => { handleSaveProfile(e); setShowProfileModal(false); }}>
+                <div className="form-group" style={{textAlign: 'left', marginBottom: '1rem'}}>
+                    <label style={{display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem', color: 'var(--text-secondary)'}}>Share ID (Custom URL)</label>
+                    <div style={{display: 'flex', alignItems: 'stretch'}}>
+                        <span style={{background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRight: 'none', padding: '0.75rem', borderRadius: '8px 0 0 8px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center'}}>gameshelf.app/u/</span>
+                        <input 
+                            type="text" 
+                            value={shareId} 
+                            onChange={(e) => setShareId(e.target.value)}
+                            placeholder="your-custom-id"
+                            className="form-control"
+                            style={{borderRadius: '0 8px 8px 0'}}
+                        />
+                    </div>
+                </div>
+                
+                <h3 style={{fontSize: '1.1rem', margin: '1.5rem 0 1rem 0', borderBottom: '1px solid var(--glass-border)', paddingBottom: '0.5rem', textAlign: 'left'}}>Gamer Tags</h3>
+                
+                <div className="form-group" style={{textAlign: 'left', marginBottom: '1rem'}}>
+                    <label style={{display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem', color: 'var(--text-secondary)'}}>Xbox Gamertag</label>
+                    <input 
+                        type="text" 
+                        value={gamerTags.xbox || ""} 
+                        onChange={(e) => setGamerTags({...gamerTags, xbox: e.target.value})}
+                        placeholder="Enter Xbox Gamertag"
+                        className="form-control"
+                    />
+                </div>
+                
+                <div className="form-group" style={{textAlign: 'left', marginBottom: '1rem'}}>
+                    <label style={{display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem', color: 'var(--text-secondary)'}}>PlayStation Network ID</label>
+                    <input 
+                        type="text" 
+                        value={gamerTags.psn || ""} 
+                        onChange={(e) => setGamerTags({...gamerTags, psn: e.target.value})}
+                        placeholder="Enter PSN ID"
+                        className="form-control"
+                    />
+                </div>
+
+                <div className="form-group" style={{textAlign: 'left', marginBottom: '1.5rem'}}>
+                    <label style={{display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem', color: 'var(--text-secondary)'}}>Steam ID / Username</label>
+                    <input 
+                        type="text" 
+                        value={gamerTags.steam || ""} 
+                        onChange={(e) => setGamerTags({...gamerTags, steam: e.target.value})}
+                        placeholder="Enter Steam Username"
+                        className="form-control"
+                    />
+                </div>
+
+                <button type="submit" className="btn primary" disabled={profileSaving} style={{width: '100%', padding: '0.85rem', fontWeight: 600}}>
+                    {profileSaving ? "Saving..." : "Save Profile"}
+                </button>
+                <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem', justifyContent: 'center' }}>
+                    <button type="button" className="theme-toggle-btn" onClick={cycleTheme} style={{ width: '45px', height: '45px', fontSize: '1.2rem' }} title="Change Theme">
+                        {currentTheme === 'theme-glass-dark' ? '🌙' : currentTheme === 'theme-retro' ? '🕹️' : '☀️'}
+                    </button>
+                    <button type="button" className="btn outline" onClick={handleSignOut} style={{ padding: '0.25rem 1.5rem', flex: 1 }}>
+                        Sign Out
+                    </button>
+                </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+    
+      {/* Game Details Side Panel */}
+      {selectedGameDetails && (
+        <div className="side-panel-overlay" onClick={() => setSelectedGameDetails(null)}>
+            <div className="side-panel" onClick={(e) => e.stopPropagation()}>
+                <button className="modal-close" onClick={() => setSelectedGameDetails(null)} style={{ alignSelf: 'flex-end', marginBottom: '1rem', position: 'static' }}>×</button>
+                {isLoadingDetails ? (
+                    <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading Game Details...</div>
+                ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '2rem', textAlign: 'center' }}>
+                            {selectedGameDetails.cover?.url ? (
+                                <img 
+                                    src={selectedGameDetails.cover.url.startsWith('//') ? `https:${selectedGameDetails.cover.url.replace('t_thumb', 't_cover_big')}` : selectedGameDetails.cover.url} 
+                                    alt={selectedGameDetails.name} 
+                                    style={{ width: '200px', borderRadius: '12px', boxShadow: '0 8px 24px rgba(0,0,0,0.4)', marginBottom: '1.5rem' }}
+                                />
+                            ) : (
+                                <div style={{ width: '200px', height: '280px', backgroundColor: 'var(--glass-border)', borderRadius: '12px', marginBottom: '1.5rem' }}></div>
+                            )}
+                            <h2 style={{ margin: '0 0 1rem 0', color: 'var(--accent-color)', fontSize: '2.2rem', lineHeight: '1.2' }}>{selectedGameDetails.name}</h2>
+                            
+                            <div style={{ display: 'flex', gap: '1.5rem', opacity: 0.9, marginBottom: '1.2rem', fontSize: '1rem' }}>
+                                {selectedGameDetails.first_release_date && (
+                                    <span>
+                                        <strong>Released:</strong> {new Date(selectedGameDetails.first_release_date * 1000).toLocaleDateString()}
+                                    </span>
+                                )}
+                                {selectedGameDetails.total_rating && (
+                                    <span>
+                                        <strong>IGDB:</strong> <span style={{ color: 'var(--accent-color)', fontWeight: 'bold' }}>{Math.round(selectedGameDetails.total_rating)}</span><span style={{ fontSize: '0.8em', opacity: 0.7 }}>/100</span>
+                                    </span>
+                                )}
+                            </div>
+                            
+                            {selectedGameDetails.genres && selectedGameDetails.genres.length > 0 && (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', justifyContent: 'center' }}>
+                                    {selectedGameDetails.genres.map(g => (
+                                        <span key={g.id} style={{ padding: '0.4rem 1rem', backgroundColor: 'var(--glass-border)', borderRadius: '16px', fontSize: '0.9rem', opacity: 0.9 }}>
+                                            {g.name}
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                        
+                        <div style={{ flex: 1, backgroundColor: 'var(--card-bg)', padding: '1.5rem', borderRadius: '12px', border: '1px solid var(--glass-border)' }}>
+                            <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.3rem', color: 'var(--text-primary)' }}>Summary</h3>
+                            <p style={{ margin: 0, lineHeight: '1.8', opacity: 0.85, fontSize: '1.1rem', textAlign: 'justify' }}>
+                                {selectedGameDetails.summary || "No description available."}
+                            </p>
+                        </div>
+                        {!games.find(g => g.game_id === selectedGameDetails.id) && (
+                            <button 
+                                className="btn primary" 
+                                style={{ marginTop: '1.5rem', padding: '1rem', width: '100%', fontSize: '1.1rem', fontWeight: 'bold', boxShadow: '0 4px 14px 0 rgba(0,118,255,0.39)', transition: 'transform 0.2s, box-shadow 0.2s' }}
+                                onMouseEnter={(e) => e.target.style.transform = 'translateY(-2px)'}
+                                onMouseLeave={(e) => e.target.style.transform = 'translateY(0)'}
+                                onClick={() => {
+                                    setSelectedGameDetails(null);
+                                    initAddGame(selectedGameDetails);
+                                }}
+                            >
+                                + Add to Shelf
+                            </button>
+                        )}
+                    </div>
+                )}
+            </div>
+        </div>
+      )}
+
+      {/* Mobile Bottom Navigation */}
+      <nav className="mobile-bottom-nav">
+          <div className="mobile-nav-item mobile-playlist-trigger" style={{ position: 'relative' }}>
+              <button 
+                  style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, zIndex: 1, border: 'none', background: 'transparent', cursor: 'pointer' }}
+                  onClick={(e) => {
+                      e.stopPropagation();
+                      setOpenDropdownId(openDropdownId === 'mobile-playlist' ? null : 'mobile-playlist');
+                  }}
+              />
+              <span className="mobile-nav-icon">📚</span>
+              <span className="mobile-nav-label">Playlists</span>
+              
+              {openDropdownId === 'mobile-playlist' && (
+                  <div className="custom-dropdown-menu" style={{ 
+                      bottom: 'calc(100% + 15px)', 
+                      left: '0.5rem', 
+                      right: 'auto', 
+                      minWidth: '160px',
+                      zIndex: 20
+                  }}>
+                      <button 
+                          className="custom-dropdown-item"
+                          onClick={(e) => { 
+                              e.stopPropagation(); 
+                              setCurrentView("home"); 
+                              window.scrollTo({ top: 0, behavior: 'smooth' });
+                              setOpenDropdownId(null); 
+                          }}
+                          style={{ fontWeight: currentView === "home" ? 'bold' : 'normal', color: currentView === "home" ? 'var(--accent-color)' : 'inherit', textAlign: 'left' }}
+                      >
+                          Home (All)
+                      </button>
+                      {playlists.map(p => (
+                          <button 
+                              key={p.id}
+                              className="custom-dropdown-item"
+                              onClick={(e) => { 
+                                  e.stopPropagation(); 
+                                  setCurrentView(`playlist-${p.id}`); 
+                                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                                  setOpenDropdownId(null); 
+                              }}
+                              style={{ fontWeight: currentView === `playlist-${p.id}` ? 'bold' : 'normal', color: currentView === `playlist-${p.id}` ? 'var(--accent-color)' : 'inherit', textAlign: 'left' }}
+                          >
+                              {p.label}
+                          </button>
+                      ))}
+                  </div>
+              )}
+          </div>
+          
+          <button 
+              className={`mobile-nav-item ${currentView === "errands" ? "active" : ""}`}
+              onClick={() => {
+                  setCurrentView("errands");
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+          >
+              <span className="mobile-nav-icon">📝</span>
+              <span className="mobile-nav-label">Errands</span>
+          </button>
+          
+          <button 
+              className="mobile-nav-item"
+              onClick={() => setShowProfileModal(true)}
+          >
+              <span className="mobile-nav-icon">👤</span>
+              <span className="mobile-nav-label">Profile</span>
+          </button>
+      </nav>
     </div>
   );
 }

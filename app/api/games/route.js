@@ -4,9 +4,12 @@ import { redis } from '@/lib/redis';
 export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const query = searchParams.get('search');
+    const genres = searchParams.get('genres'); // e.g., '12,5'
+    const startYear = searchParams.get('startYear');
+    const endYear = searchParams.get('endYear');
     
-    if (!query) {
-        return NextResponse.json({ error: 'Search query is required' }, { status: 400 });
+    if (!query && !genres && !startYear && !endYear) {
+        return NextResponse.json({ error: 'Search query or filters are required' }, { status: 400 });
     }
 
     const clientId = process.env.IGDB_CLIENT_ID;
@@ -16,10 +19,16 @@ export async function GET(request) {
         return NextResponse.json({ error: 'IGDB credentials are not configured on the server' }, { status: 500 });
     }
 
+    // Generate a unique cache key based on query + filters
+    let cacheKey = `igdb:search:${query.toLowerCase()}`;
+    if (genres) cacheKey += `:g:${genres}`;
+    if (startYear) cacheKey += `:s:${startYear}`;
+    if (endYear) cacheKey += `:e:${endYear}`;
+
     try {
         // Try to get search results from Cache
         if (redis) {
-            const cachedIds = await redis.get(`igdb:search:${query.toLowerCase()}`);
+            const cachedIds = await redis.get(cacheKey);
             if (cachedIds && Array.isArray(cachedIds)) {
                 // Fetch individual games
                 const pipeline = redis.pipeline();
@@ -58,6 +67,29 @@ export async function GET(request) {
             }
         }
 
+        // Build the where clause for IGDB dynamically
+        let whereClauses = [];
+        
+        if (query && query.trim().length > 0) {
+            whereClauses.push(`name ~ *"${query}"*`);
+        }
+        
+        if (genres) {
+            whereClauses.push(`genres = (${genres})`);
+        }
+        
+        if (startYear) {
+            const startTimestamp = Math.floor(new Date(`${startYear}-01-01T00:00:00Z`).getTime() / 1000);
+            whereClauses.push(`first_release_date >= ${startTimestamp}`);
+        }
+        
+        if (endYear) {
+            const endTimestamp = Math.floor(new Date(`${endYear}-12-31T23:59:59Z`).getTime() / 1000);
+            whereClauses.push(`first_release_date <= ${endTimestamp}`);
+        }
+        
+        const whereClause = whereClauses.length > 0 ? `where ${whereClauses.join(' & ')};` : '';
+
         // Search IGDB
         // Increase limit to fetch more results since we'll filter out DLCs and bundles in code
         const igdbRes = await fetch('https://api.igdb.com/v4/games', {
@@ -67,7 +99,7 @@ export async function GET(request) {
                 'Authorization': `Bearer ${accessToken}`,
                 'Accept': 'application/json'
             },
-            body: `fields id, name, cover.url, first_release_date, slug, category; where name ~ *"${query}"*; sort rating desc; limit 20;`
+            body: `fields id, name, cover.url, first_release_date, slug, category; ${whereClause} sort rating desc; limit 20;`
         });
         
         if (!igdbRes.ok) {
@@ -94,7 +126,7 @@ export async function GET(request) {
             });
             
             // Cache search query mapped to IDs for 24 hours
-            pipeline.set(`igdb:search:${query.toLowerCase()}`, resultIds, { ex: 24 * 60 * 60 });
+            pipeline.set(cacheKey, resultIds, { ex: 24 * 60 * 60 });
             await pipeline.exec();
         }
 
